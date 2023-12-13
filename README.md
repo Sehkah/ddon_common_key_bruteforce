@@ -44,10 +44,11 @@ Optional arguments:
 * Added a new Zen4 optimization flags option to cmake, enabled by default
 * Added a guide on how to build this via MSYS2
 * Changed to a static build due to some MSYS2-related weirdness with Clang linkage
+* Added ability to provide the first 8 bytes of the expected packet header
 * Throughput is higher compared to the "regular" version available in the original repository
     * Runs 200 work-seconds faster (relatively) compared to the regular version within the same time frame on a Ryzen 7 7800X3D
 ```
-timeout 20 ./ddon_common_key_bruteforce.exe 7C816029E153C304714DEFFD9FDFD4A8
+timeout 20 ./ddon_common_key_bruteforce.exe 7C816029E153C304714DEFFD9FDFD4A8 0100000234000000
 
 # (regular) Progress: 1216000/86400000ms (1216 work-seconds)
 # (optimized) Progress: 1424000/86400000ms (1424 work-seconds)

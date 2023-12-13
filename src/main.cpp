@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <chrono>
+#include <array>
 #include "camellia.h"
 #include "ctpl_stl.h"
 #include "argparse.hpp"
@@ -30,9 +31,18 @@ const char* camellia_default_iv = "$cbM6WP)aX=%J^zA";
 //unsigned char ciphertext[] = { 0xFB, 0x33, 0x40, 0xB4, 0x72, 0x14, 0xCC, 0x1E, 0x53, 0xE6, 0xD8, 0xE6, 0x65, 0x2E, 0xF0, 0x38 }; // rumi unk5 -- Found match at ms26242, i:237, key: hREUMreQsowZisof2tBCtXrXUvcvqVUv
 
 unsigned char ciphertext[16] = { 0 };
+unsigned char expectedPlaintext[16] = { 0 };
 
+inline static bool arraysPartiallyEqual(const unsigned char* arr1, const unsigned char* arr2, int size) {
+    for (int i = 0; i < size; ++i) {
+        if (arr1[i] != arr2[i]) {
+            return false;
+        }
+    }
+    return true;
+}
 
-inline bool bruteforce_millisecond(int ms, int key_depth) {
+inline static bool bruteforce_millisecond(int ms, int key_depth) {
     SeededXorshift128 mrand;
     KEY_TABLE_TYPE keytable;
     unsigned char plaintext[16] = { 0 };
@@ -57,21 +67,16 @@ inline bool bruteforce_millisecond(int ms, int key_depth) {
             plaintext[j] ^= camellia_default_iv[j];
         }
 
-        // Check if the current key index decrypts to the expected LoginServer->Client packet.
-        if (
-                plaintext[0] == 0x01 && // Group IDX
-                plaintext[1] == 0x00 && // Handler ID lo
-                plaintext[2] == 0x00 && // Handler ID hi
-                plaintext[3] == 0x02 && // Handler sub id
-                plaintext[4] == 0x34 && // Unk field, 0x34 when comes from server? unverified
+        bool isEqual = true;
+        for (int i = 0; i < 8; ++i) {
+            if (expectedPlaintext[i] != plaintext[i]) {
+                isEqual = false;
+                break;
+            }
+        }
 
-                // Packet counter bytes. Always seems to be 0 when coming from the server, which this packet is.
-                // This needs to be verified.
-                plaintext[5] == 0x00 &&
-                plaintext[6] == 0x00 &&
-                plaintext[7] == 0x00 &&
-                plaintext[8] == 0x00
-            ) {
+        // Check if the current key index decrypts to the expected LoginServer/GameServer->Client packet.
+        if (isEqual) {
                 const std::lock_guard<std::mutex> lock(stdout_mutex);
                 char key_copy[KEY_LENGTH + 1] = { 0 };
                 std::memcpy(key_copy, key_buffer.data() + i, KEY_LENGTH);
@@ -83,7 +88,7 @@ inline bool bruteforce_millisecond(int ms, int key_depth) {
     return false;
 }
 
- int bruteforce(int start_time_seconds, int end_time_seconds, int key_depth, int num_threads) {
+static int bruteforce(int start_time_seconds, int end_time_seconds, int key_depth, int num_threads) {
 
     std::cout << "Starting bruteforcer with " << num_threads << " threads. Progress will be reported periodically.\n";
 
@@ -166,6 +171,9 @@ int main(int argc, char** argv) {
     program.add_argument("payload")
         .help("The payload to be bruteforced against.\n\t\tThis should be first 16 bytes of the second packet sent from the login server (do not include the 0060 prefix)");
 
+    program.add_argument("expected_plaintext")
+        .help("The expected first 8 bytes of the decrypted packet header in hex, e.g. 0100000234000000 (login) or 2C00000234000000 (game)");
+
     try {
         program.parse_args(argc, argv);
     }
@@ -204,6 +212,25 @@ int main(int argc, char** argv) {
     else
     {
         std::cerr << "Payload must be exactly 16 hex digits!\n";
+        std::cerr << program;
+        std::exit(1);
+    }
+    if (program.get<std::string>("expected_plaintext").length() == 8 * 2) {
+        // Convert hex string to std::vector<uint8_t>;
+        auto expected_plaintext_str = program.get<std::string>("expected_plaintext");
+        std::vector<uint8_t> expected_plaintext;
+        for (size_t i = 0; i < expected_plaintext_str.length(); i += 2)
+        {
+            std::istringstream ss(expected_plaintext_str.substr(i, 2));
+            uint32_t x;
+            ss >> std::hex >> x;
+            expected_plaintext.push_back((uint8_t)x);
+        }
+
+        std::memcpy(expectedPlaintext, expected_plaintext.data(), sizeof(expectedPlaintext));
+    }
+    else {
+        std::cerr << "Expected plaintext must be exactly 8 hex digits!\n";
         std::cerr << program;
         std::exit(1);
     }
