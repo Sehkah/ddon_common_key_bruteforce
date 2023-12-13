@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Jussi Kivilinna <jussi.kivilinna@iki.fi>
+ * Copyright (C) 2020,2022 Jussi Kivilinna <jussi.kivilinna@iki.fi>
  *
  * SPDX-License-Identifier: MIT
  */
@@ -10,7 +10,7 @@
 #include <string.h>
 #include <assert.h>
 #include <time.h>
-#include <openssl/camellia.h>
+#include "camellia-BSD-1.2.0/camellia.h"
 #include "camellia_simd.h"
 
 static const uint8_t test_vector_plaintext[] = {
@@ -51,6 +51,54 @@ static const uint8_t test_vector_ciphertext_256[] = {
   0x20,0xef,0x7c,0x91,0x9e,0x3a,0x75,0x09
 };
 
+typedef struct
+{
+  KEY_TABLE_TYPE table;
+  int nbits;
+} CAMELLIA_KEY;
+
+static void Camellia_set_key(const void *key, int nbits, CAMELLIA_KEY *ctx)
+{
+  ctx->nbits = nbits;
+  Camellia_Ekeygen(nbits, key, ctx->table);
+}
+
+static void Camellia_encrypt_nblks(const void *src, void *dst, int nblks,
+				   CAMELLIA_KEY *ctx)
+{
+  int nbits = ctx->nbits;
+  while (nblks)
+  {
+    Camellia_EncryptBlock(nbits, src, ctx->table, dst);
+    src = (const uint8_t *)src + 16;
+    dst = (uint8_t *)dst + 16;
+    nblks--;
+  }
+}
+
+static void Camellia_decrypt_nblks(const void *src, void *dst, int nblks,
+				   CAMELLIA_KEY *ctx)
+{
+  int nbits = ctx->nbits;
+  while (nblks)
+  {
+    Camellia_DecryptBlock(nbits, src, ctx->table, dst);
+    src = (const uint8_t *)src + 16;
+    dst = (uint8_t *)dst + 16;
+    nblks--;
+  }
+}
+
+static void Camellia_encrypt(const void *src, void *dst, CAMELLIA_KEY *ctx)
+{
+  Camellia_encrypt_nblks(src, dst, 1, ctx);
+}
+
+static void Camellia_decrypt(const void *src, void *dst, CAMELLIA_KEY *ctx)
+{
+  Camellia_decrypt_nblks(src, dst, 1, ctx);
+}
+
 static void fill_blks(uint8_t *fill, const uint8_t *blk, unsigned int nblks)
 {
   while (nblks) {
@@ -79,7 +127,7 @@ static __attribute__((unused)) const char *blk2str(const uint8_t *blk)
 static void do_selftest(void)
 {
   struct camellia_simd_ctx ctx_simd;
-  CAMELLIA_KEY ctx_ref;
+  CAMELLIA_KEY ctx_ref = { 0 };
   uint8_t key[32];
   uint8_t tmp[32 * 16];
   uint8_t plaintext_simd[32 * 16];
@@ -89,21 +137,21 @@ static void do_selftest(void)
   unsigned int i, j;
 
   /* Check test vectors against reference implementation. */
-  printf("selftest: comparing camellia-%d against reference implementation...\n", 128);
+  printf("selftest: comparing camellia-%d test vectors against reference implementation...\n", 128);
   Camellia_set_key(test_vector_key_128, 128, &ctx_ref);
   Camellia_encrypt(test_vector_plaintext, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_ciphertext_128, 16) == 0);
   Camellia_decrypt(tmp, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
 
-  printf("selftest: comparing camellia-%d against reference implementation...\n", 192);
+  printf("selftest: comparing camellia-%d test vectors against reference implementation...\n", 192);
   Camellia_set_key(test_vector_key_192, 192, &ctx_ref);
   Camellia_encrypt(test_vector_plaintext, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_ciphertext_192, 16) == 0);
   Camellia_decrypt(tmp, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
 
-  printf("selftest: comparing camellia-%d against reference implementation...\n", 256);
+  printf("selftest: comparing camellia-%d test vectors against reference implementation...\n", 256);
   Camellia_set_key(test_vector_key_256, 256, &ctx_ref);
   Camellia_encrypt(test_vector_plaintext, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_ciphertext_256, 16) == 0);
@@ -126,6 +174,7 @@ static void do_selftest(void)
   camellia_decrypt_16blks_simd128(&ctx_simd, tmp, tmp);
   assert(memcmp(tmp, plaintext_simd, 16 * 16) == 0);
 
+  printf("selftest: checking 16-block parallel camellia-192/SIMD128 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
@@ -136,6 +185,7 @@ static void do_selftest(void)
   camellia_decrypt_16blks_simd128(&ctx_simd, tmp, tmp);
   assert(memcmp(tmp, plaintext_simd, 16 * 16) == 0);
 
+  printf("selftest: checking 16-block parallel camellia-256/SIMD128 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
@@ -163,6 +213,7 @@ static void do_selftest(void)
   camellia_decrypt_32blks_simd256(&ctx_simd, tmp, tmp);
   assert(memcmp(tmp, plaintext_simd, 32 * 16) == 0);
 
+  printf("selftest: checking 32-block parallel camellia-192/SIMD256 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
@@ -173,6 +224,7 @@ static void do_selftest(void)
   camellia_decrypt_32blks_simd256(&ctx_simd, tmp, tmp);
   assert(memcmp(tmp, plaintext_simd, 32 * 16) == 0);
 
+  printf("selftest: checking 32-block parallel camellia-256/SIMD256 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
@@ -221,6 +273,7 @@ static void do_selftest(void)
   }
   assert(memcmp(tmp, ref_large_plaintext, 16 * 16) == 0);
 
+  printf("selftest: checking 16-block parallel camellia-256/SIMD128 against large test vectors...\n");
   camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
@@ -246,6 +299,7 @@ static void do_selftest(void)
   }
   assert(memcmp(tmp, ref_large_plaintext, 32 * 16) == 0);
 
+  printf("selftest: checking 32-block parallel camellia-256/SIMD256 against large test vectors...\n");
   camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
   memcpy(tmp, ref_large_plaintext, 32 * 16);
   for (i = 0; i < (1 << 16); i++) {
@@ -284,8 +338,8 @@ static void do_speedtest(void)
 {
   const uint64_t test_nsecs = 1ULL * 1000 * 1000 * 1000;
   struct camellia_simd_ctx ctx_simd;
-  CAMELLIA_KEY ctx_ref;
-  uint8_t tmp[16 * 32 * 16] __attribute__((aligned(16)));
+  CAMELLIA_KEY ctx_ref = { 0 };
+  uint8_t tmp[16 * 32 * 16] __attribute__((aligned(64)));
   uint64_t start_time;
   uint64_t end_time;
   uint64_t total_bytes;
@@ -300,11 +354,8 @@ static void do_speedtest(void)
 
   start_time = curr_clock_nsecs();
   do {
-    for (j = 0; j < sizeof(tmp); ) {
-      Camellia_encrypt(&tmp[j], &tmp[j], &ctx_ref);
-      j += 16;
-      total_bytes += 16;
-    }
+    Camellia_encrypt_nblks(tmp, tmp, sizeof(tmp) / 16, &ctx_ref);
+    total_bytes += sizeof(tmp) - sizeof(tmp) % 16;
     end_time = curr_clock_nsecs();
   } while (start_time + test_nsecs > end_time);
 
@@ -316,11 +367,8 @@ static void do_speedtest(void)
 
   start_time = curr_clock_nsecs();
   do {
-    for (j = 0; j < sizeof(tmp); ) {
-      Camellia_decrypt(&tmp[j], &tmp[j], &ctx_ref);
-      j += 16;
-      total_bytes += 16;
-    }
+    Camellia_decrypt_nblks(tmp, tmp, sizeof(tmp) / 16, &ctx_ref);
+    total_bytes += sizeof(tmp) - sizeof(tmp) % 16;
     end_time = curr_clock_nsecs();
   } while (start_time + test_nsecs > end_time);
 

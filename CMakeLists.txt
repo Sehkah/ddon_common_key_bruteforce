@@ -1,8 +1,9 @@
 ﻿cmake_minimum_required(VERSION 3.8)
 
 set(DDON_BRUTEFORCE_EXE ddon_common_key_bruteforce)
-set(DDON_ENABLE_SIMD 0)
-set(DDON_ENABLE_ASM 0)
+set(DDON_ENABLE_SIMD 1)
+set(DDON_ENABLE_ASM 1)
+set(DDON_ENABLE_ZEN_OPTIMIZED 1)
 
 if (DDON_ENABLE_SIMD)
     message("SIMD enabled")
@@ -23,6 +24,9 @@ endif ()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_EXE_LINKER_FLAGS "-static")
 
 message(Project: ${PROJECT_NAME})
 message(BuildType: ${CMAKE_BUILD_TYPE})
@@ -61,10 +65,38 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
                 )
     ELSE()
         message([LOWL] Setting Release Flags)
-        target_compile_options(${DDON_BRUTEFORCE_EXE} PRIVATE
-                -O2
-                -Werror
-                )
+        if(NOT DDON_ENABLE_ZEN_OPTIMIZED)
+            target_compile_options(${DDON_BRUTEFORCE_EXE} PRIVATE
+                        -O2
+                        -Werror
+                        -march=haswell 
+                        -mtune=native 
+                        -mavx2
+                        -maes
+                    )
+        else ()
+            target_compile_options(${DDON_BRUTEFORCE_EXE} PRIVATE
+                        -O2
+                        -Werror
+                        -march=znver4
+                        -mtune=native
+                        -mavx512f
+                        -mavx512vl
+                        -mavx512bw
+                        -mavx512dq
+                        -mavx512vbmi
+                        -mavx512ifma
+                        -mavx512vpopcntdq
+				        -mavx512vbmi2
+                        -mavx512bitalg
+                        -mavx512vnni
+                        -mprefer-vector-width=512
+                        -mavx2
+                        -maes
+                        -mvaes
+                        -mgfni
+                    )
+        endif()
     ENDIF ()
 endif ()
 
@@ -87,15 +119,39 @@ if (DDON_ENABLE_SIMD)
 
     add_library(${CAMELLIA_SIMD} STATIC ${CAMELLIA_SIMD_SOURCES})
     target_include_directories(${CAMELLIA_SIMD} PUBLIC camellia-simd-aesni/)
-    target_compile_options(${CAMELLIA_SIMD} PUBLIC
-            -maes
-            -mavx2
-            #-msse4.1
-            -mtune=native
-            -march=sandybridge
-            )
-    #target_link_options(${CAMELLIA_SIMD} PUBLIC
-    #        LINKER:-lcrypto
-    #        )
+
+    if(NOT DDON_ENABLE_ZEN_OPTIMIZED)
+        target_compile_options(${CAMELLIA_SIMD} PUBLIC
+                -O2
+                -Werror
+                -march=haswell 
+                -mtune=native 
+                -mavx2
+                -maes
+                )
+    else ()
+        target_compile_options(${CAMELLIA_SIMD} PUBLIC
+                -O2
+                -Werror
+                -march=znver4
+                -mtune=native
+                -mavx512f
+                -mavx512vl
+                -mavx512bw
+                -mavx512dq
+                -mavx512vbmi
+                -mavx512ifma
+                -mavx512vpopcntdq
+				-mavx512vbmi2
+                -mavx512bitalg
+                -mavx512vnni
+                -mprefer-vector-width=512
+                -mavx2
+                -maes
+                -mvaes
+                -mgfni
+                )
+    endif()
+
     target_link_libraries(${DDON_BRUTEFORCE_EXE} PUBLIC ${CAMELLIA_SIMD})
 endif ()
